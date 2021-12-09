@@ -13,8 +13,8 @@
     <OutputType>Library</OutputType>
     <RootNamespace>LibreMetaverse</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
-	<EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
-    <TargetFrameworks>netstandard2.0;netstandard2.1;net5.0</TargetFrameworks>
+    <EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net5.0;net6.0</TargetFrameworks>
     <Platforms>AnyCPU;x64;x86</Platforms>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -146,10 +146,8 @@
     </None>
   </ItemGroup>
   <PropertyGroup>
-    <PreBuildEvent>
-    </PreBuildEvent>
-    <PostBuildEvent>
-    </PostBuildEvent>
+    <PreBuildEvent></PreBuildEvent>
+    <PostBuildEvent></PostBuildEvent>
     <Version>1.2.0</Version>
     <Authors>Sjofn LLC, OpenMetaverse Developers</Authors>
     <Product>LibreMetaverse</Product>
