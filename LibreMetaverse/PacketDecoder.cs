@@ -26,7 +26,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Reflection;
 using System.Text;
 
@@ -884,7 +883,7 @@ namespace OpenMetaverse.Packets
             if (hasMeshFlags)
             {
                 result.AppendFormat("{0,30}", "<MeshFlags>" + Environment.NewLine);
-                result.AppendFormat("{0,30}", meshFlags.ToString() + Environment.NewLine);
+                result.AppendFormat("{0,30}", meshFlags + Environment.NewLine);
                 result.AppendFormat("{0,30}", "</MeshFlags>" + Environment.NewLine);
             }
 

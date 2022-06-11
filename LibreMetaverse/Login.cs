@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2019-2021, Sjofn, LLC
+ * Copyright (c) 2019-2022, Sjofn, LLC
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -35,7 +35,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -90,6 +89,28 @@ namespace OpenMetaverse
 
     #region Structs
 
+    public class LoginCredential
+    {
+        public string FirstName { get; private set; }
+        public string LastName { get; private set; }
+        public string Password { get; private set; }
+        public string Token { get; private set; }
+        public string MfaHash { get; private set; }
+
+        public LoginCredential(string first, string last, string passwd, string token, string mfaHash)
+        {
+            FirstName = first;
+            LastName = last;
+            Password = passwd;
+            Token = token;
+            MfaHash = mfaHash;
+        }
+
+        public LoginCredential(string first, string last, string passwd)
+            : this(first, last, passwd, string.Empty, string.Empty)
+        { }
+    }
+
     /// <summary>
     /// Login Request Parameters
     /// </summary>
@@ -110,10 +131,16 @@ namespace OpenMetaverse
         /// <summary>A md5 hashed password</summary>
         /// <remarks>plaintext password will be automatically hashed</remarks>
         public string Password;
+        /// <summary>The user's entered Time based One Time Password (TOTP) token.</summary>
+        /// <remarks>This should be the empty string for login attempts that are not responding to an MFA challenge.</remarks>
+        public string Token;
+        /// <summary>The saved hash value and timestamp from a previously successfully answered MFA challenge.</summary>
+        /// <remarks>This should be the empty string initially.</remarks>
+        public string MfaHash;
         /// <summary>The agents starting location home or last</summary>
-        /// <remarks>Please use LoginLocation for custom region and Location</remarks>
+        /// <remarks>Either "last", "home", or a string encoded URI 
+        /// containing the simulator name and x/y/z coordinates e.g: uri:hooper&amp;128&amp;152&amp;17</remarks>
         public string Start;
-
         /// <summary>A string containing the client software channel information</summary>
         /// <example>Second Life Release</example>
         public string Channel;
@@ -145,7 +172,7 @@ namespace OpenMetaverse
         public LastExecStatus LastExecEvent;
 
         /// <summary>An array of string sent to the login server to enable various options</summary>
-        public string[] Options;
+        public List<string> Options;
 
         /// <summary>A randomly generated ID to distinguish between login attempts. This value is only used
         /// internally in the library and is never sent over the wire</summary>
@@ -154,6 +181,11 @@ namespace OpenMetaverse
         /// <summary>LoginLocation used to set the starting region and location (overrides Start) example: "Tentacles/128/64/109"</summary>
         /// <remarks>Leave empty to use the starting location</remarks>
         public string LoginLocation;
+
+        /// <summary>
+        /// Is the client Multi-Factor Authentication enabled
+        /// </summary>
+        public bool MfaEnabled;
 
         /// <summary>
         /// Default constructor, initializes sane default values
@@ -201,7 +233,7 @@ namespace OpenMetaverse
                 "search"
             };
 
-            Options = options.ToArray();
+            Options = options;
             // *TODO: include library and opensim options when we support them
             MethodName = "login_to_simulator";
             Start = "last";
@@ -213,6 +245,44 @@ namespace OpenMetaverse
             AgreeToTos = true;
             ReadCritical = true;
             LastExecEvent = LastExecStatus.Normal;
+        }
+
+        /// <summary>
+        /// Instantiate LoginParams
+        /// </summary>
+        /// <remarks>Use this constructor if Application supports multi-factor authentication</remarks>
+        /// <param name="client">Instance of <seealso cref="GridClient"/></param>
+        /// <param name="credential">Instance of <seealso cref="LoginCredential"/></param>
+        /// <param name="channel">Login channel (application name)</param>
+        /// <param name="version">Client version, as application name + version number</param>
+        public LoginParams(GridClient client, LoginCredential credential, string channel, string version)
+            : this()
+        {
+            URI = client.Settings.LOGIN_SERVER;
+            Timeout = client.Settings.LOGIN_TIMEOUT;
+            MfaEnabled = client.Settings.MFA_ENABLED;
+            FirstName = credential.FirstName;
+            LastName = credential.LastName;
+            Password = credential.Password;
+            Token = credential.Token;
+            MfaHash = credential.MfaHash;
+            Channel = channel;
+            Version = version;
+        }
+
+        /// <summary>
+        /// Instantiate LoginParams
+        /// </summary>
+        /// <remarks>Use this constructor if Application supports multi-factor authentication</remarks>
+        /// <param name="client">Instance of <seealso cref="GridClient"/></param>
+        /// <param name="credential">Instance of <seealso cref="LoginCredential"/></param>
+        /// <param name="channel">Login channel (application name)</param>
+        /// <param name="version">Client version, as application name + version number</param>
+        /// <param name="loginUri">Address of login service</param>
+        public LoginParams(GridClient client, LoginCredential credential, string channel, string version, string loginUri)
+            : this(client, credential, channel, version)
+        {
+            URI = loginUri;
         }
 
         /// <summary>
@@ -262,6 +332,13 @@ namespace OpenMetaverse
         public int BuddyRightsHas;
     }
 
+    public struct HomeInfo
+    {
+        public ulong RegionHandle;
+        public Vector3 Position;
+        public Vector3 LookAt;
+    }
+
     /// <summary>
     /// The decoded data returned from the login server after a successful login
     /// </summary>
@@ -278,6 +355,7 @@ namespace OpenMetaverse
         public UUID AgentID;
         public UUID SessionID;
         public UUID SecureSessionID;
+        public string MfaHash;
         public string FirstName;
         public string LastName;
         public string StartLocation;
@@ -287,9 +365,7 @@ namespace OpenMetaverse
         public string AgentRegionAccess;
         public string InitialOutfit;
         public Vector3 LookAt;
-        public ulong HomeRegion;
-        public Vector3 HomePosition;
-        public Vector3 HomeLookAt;
+        public HomeInfo Home;
         public int CircuitCode;
         public uint RegionX;
         public uint RegionY;
@@ -361,33 +437,52 @@ namespace OpenMetaverse
             }
             catch (OSDException e)
             {
-                Logger.Log("Login server returned (some) invalid data: " + e.Message, Helpers.LogLevel.Warning);
+                Logger.Log("Login server returned (some) invalid data", Helpers.LogLevel.Warning, e);
             }
 
             // Home
-            var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].AsString());
-
-            if (osdHome.Type == OSDType.Map)
+            if (reply.ContainsKey("home_info"))
             {
-                var home = (OSDMap)osdHome;
-
-                OSD homeRegion;
-                if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                if (reply["home_info"].Type == OSDType.Map)
                 {
-                    var homeArray = (OSDArray)homeRegion;
-                    HomeRegion = homeArray.Count == 2
-                        ? Utils.UIntsToLong((uint)homeArray[0].AsInteger(), (uint)homeArray[1].AsInteger())
-                        : 0;
-                }
+                    var map = (OSDMap)reply["home_info"];
+                    Home.Position = ParseVector3("position", map);
+                    Home.LookAt = ParseVector3("look_at", map);
 
-                HomePosition = ParseVector3("position", home);
-                HomeLookAt = ParseVector3("look_at", home);
+                    var coords = (OSDArray)OSDParser.DeserializeLLSDNotation(map["region_handle"].ToString());
+                    if (coords.Type == OSDType.Array)
+                    {
+                        Home.RegionHandle = (coords.Count == 2)
+                            ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+                    }
+                }
+            }
+            else if (reply.ContainsKey("home"))
+            {
+                var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].AsString());
+
+                if (osdHome.Type == OSDType.Map)
+                {
+                    var home = (OSDMap)osdHome;
+
+                    OSD homeRegion;
+                    if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                    {
+                        var homeArray = (OSDArray)homeRegion;
+                        Home.RegionHandle = homeArray.Count == 2
+                            ? Utils.UIntsToLong((uint)homeArray[0].AsInteger(), (uint)homeArray[1].AsInteger())
+                            : 0;
+                    }
+
+                    Home.Position = ParseVector3("position", home);
+                    Home.LookAt = ParseVector3("look_at", home);
+                }
             }
             else
             {
-                HomeRegion = 0;
-                HomePosition = Vector3.Zero;
-                HomeLookAt = Vector3.Zero;
+                Home.RegionHandle = 0;
+                Home.Position = Vector3.Zero;
+                Home.LookAt = Vector3.Zero;
             }
 
             CircuitCode = (int)ParseUInt("circuit_code", reply);
@@ -429,6 +524,68 @@ namespace OpenMetaverse
             LibraryOwner = ParseMappedUUID("inventory-lib-owner", "agent_id", reply);
             LibraryRoot = ParseMappedUUID("inventory-lib-root", "folder_id", reply);
             LibrarySkeleton = ParseInventorySkeleton("inventory-skel-lib", reply);
+
+            if (reply.ContainsKey("mfa_hash"))
+            {
+                MfaHash = ParseString("mfa_hash", reply);
+            }
+
+            if (reply.ContainsKey("account_level_benefits"))
+            {
+                if (reply["account_level_benefits"].Type == OSDType.Map)
+                {
+                    AccountLevelBenefits = ((OSDMap)reply["account_level_benefits"]).ToHashtable();
+                }
+            }
+
+            if (reply.ContainsKey("classified_categories"))
+            {
+                if (reply["classified_categories"].Type == OSDType.Array)
+                {
+                    ClassifiedCategories = ((OSDArray)reply["classified_categories"]).ToArrayList();
+                }
+            }
+
+            if (reply.ContainsKey("event_categories"))
+            {
+                if (reply["event_categories"].Type == OSDType.Array)
+                {
+                    EventCategories = ((OSDArray)reply["event_categories"]).ToArrayList();
+                }
+            }
+
+            if (reply.ContainsKey("global-textures"))
+            {
+                if (reply["global-textures"].Type == OSDType.Array)
+                {
+                    GlobalTextures = ((OSDArray)reply["global-textures"]).ToArrayList();
+                }
+            }
+
+            if (reply.ContainsKey("premium_packages"))
+            {
+                if (reply["premium_packages"].Type == OSDType.Map)
+                {
+                    PremiumPackages = ((OSDMap)reply["premium_packages"]).ToHashtable();
+                }
+            }
+
+            if (reply.ContainsKey("ui-config"))
+            {
+                if (reply["ui-config"].Type == OSDType.Array)
+                {
+                    UiConfig = ((OSDArray)reply["ui-config"]).ToArrayList();
+                }
+            }
+
+            if (reply.ContainsKey("max-agent-groups"))
+            {
+                MaxAgentGroups = (int)ParseUInt("max-agent-groups", reply);
+            }
+            else
+            {
+                MaxAgentGroups = -1;
+            }
         }
 
         public void Parse(Hashtable reply)
@@ -466,38 +623,71 @@ namespace OpenMetaverse
             {
                 Logger.Log("Login server returned (some) invalid data: " + e.Message, Helpers.LogLevel.Warning);
             }
-            if (!Success)
-                return;
+            if (!Success) { return; }
 
-            // Home
-            if (reply.ContainsKey("home"))
+            // HomeInfo
+            try
             {
-                var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].ToString());
-
-                if (osdHome.Type == OSDType.Map)
+                if (reply.ContainsKey("home_info"))
                 {
-                    var home = (OSDMap)osdHome;
-
-                    OSD homeRegion;
-                    if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                    if (reply?["home_info"] is Hashtable map)
                     {
-                        var homeArray = (OSDArray)homeRegion;
-                        if (homeArray.Count == 2)
-                            HomeRegion = Utils.UIntsToLong((uint)homeArray[0].AsInteger(),
-                                                           (uint)homeArray[1].AsInteger());
-                        else
-                            HomeRegion = 0;
-                    }
+                        Home.Position = ParseVector3("position", map);
+                        Home.LookAt = ParseVector3("look_at", map);
 
-                    HomePosition = ParseVector3("position", home);
-                    HomeLookAt = ParseVector3("look_at", home);
+                        var coords = (OSDArray)OSDParser.DeserializeLLSDNotation(map["region_handle"].ToString());
+                        if (coords.Type == OSDType.Array)
+                        {
+                            Home.RegionHandle = (coords.Count == 2)
+                                ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+                        }
+                    }
                 }
-            }
-            else
+
+                // Home
+                if (Home.RegionHandle == 0 && reply.ContainsKey("home"))
+                {
+                    if (reply?["home"] is Hashtable map)
+                    {
+                        Home.Position = ParseVector3("position", map);
+                        Home.LookAt = ParseVector3("look_at", map);
+
+                        var coords = (OSDArray)OSDParser.DeserializeLLSDNotation(map["region_handle"].ToString());
+                        if (coords.Type == OSDType.Array)
+                        {
+                            Home.RegionHandle = (coords.Count == 2)
+                                ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+                        }
+                    }
+                    else if (reply?["home"] is string osdString)
+                    {
+                        var osdHome = OSDParser.DeserializeLLSDNotation(reply["home"].ToString());
+
+                        if (osdHome.Type == OSDType.Map)
+                        {
+                            var home = (OSDMap)osdHome;
+
+                            OSD homeRegion;
+                            if (home.TryGetValue("region_handle", out homeRegion) && homeRegion.Type == OSDType.Array)
+                            {
+                                var coords = (OSDArray)homeRegion;
+                                Home.RegionHandle = (coords.Count == 2)
+                                    ? Utils.UIntsToLong((uint)coords[0].AsInteger(), (uint)coords[1].AsInteger()) : 0;
+
+                            }
+                            Home.Position = ParseVector3("position", home);
+                            Home.LookAt = ParseVector3("look_at", home);
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception("Could not parse 'home' in Login Response");
+                    }
+                }
+            } catch (Exception ex)
             {
-                HomeRegion = 0;
-                HomePosition = Vector3.Zero;
-                HomeLookAt = Vector3.Zero;
+                Logger.Log("Could not parse home info from login response. Setting nil", Helpers.LogLevel.Warning, ex);
+                Home = new HomeInfo();
             }
 
             CircuitCode = (int)ParseUInt("circuit_code", reply);
@@ -547,6 +737,11 @@ namespace OpenMetaverse
             OpenIDUrl = ParseString("openid_url", reply);
             SnapshotConfigUrl = ParseString("snapshot_config_url", reply);
             UDPBlacklist = ParseString("udp_blacklist", reply);
+
+            if (reply.ContainsKey("mfa_hash"))
+            {
+                MfaHash = ParseString("mfa_hash", reply);
+            }
 
             if (reply.ContainsKey("account_level_benefits"))
             {
@@ -939,7 +1134,7 @@ namespace OpenMetaverse
         /// <summary>Seed CAPS URL returned from the login server</summary>
         public string LoginSeedCapability = string.Empty;
         /// <summary>Current state of logging in</summary>
-        public LoginStatus LoginStatusCode => InternalStatusCode;
+        public LoginStatus LoginStatusCode { get; private set; } = LoginStatus.None;
 
         /// <summary>Upon login failure, contains a short string key for the
         /// type of login error that occurred</summary>
@@ -973,7 +1168,6 @@ namespace OpenMetaverse
         
         private LoginParams CurrentContext = null;
         private readonly AutoResetEvent LoginEvent = new AutoResetEvent(false);
-        private LoginStatus InternalStatusCode = LoginStatus.None;
         private readonly Dictionary<LoginResponseCallback, string[]> CallbackOptions = new Dictionary<LoginResponseCallback, string[]>();
 
         /// <summary>A list of packets obtained during the login process which 
@@ -991,12 +1185,11 @@ namespace OpenMetaverse
         /// <param name="password">Account password</param>
         /// <param name="channel">Client application name (channel)</param>
         /// <param name="version">Client application name + version</param>
-        /// <returns>A populated <seealso cref="LoginParams"/> struct containing
-        /// sane defaults</returns>
+        /// <returns>A populated <seealso cref="LoginParams"/> object containing sane defaults</returns>
         public LoginParams DefaultLoginParams(string firstName, string lastName, string password,
             string channel, string version)
         {
-            return new LoginParams(Client, firstName, lastName, password, channel, version);
+            return new LoginParams(Client, new LoginCredential(firstName, lastName, password), channel, version);
         }
 
         /// <summary>
@@ -1058,12 +1251,12 @@ namespace OpenMetaverse
             if (CurrentContext != null)
             {
                 CurrentContext = null; // Will force any pending callbacks to bail out early
-                InternalStatusCode = LoginStatus.Failed;
+                LoginStatusCode = LoginStatus.Failed;
                 LoginMessage = "Timed out";
                 return false;
             }
 
-            return (InternalStatusCode == LoginStatus.Success);
+            return (LoginStatusCode == LoginStatus.Success);
         }
 
         public void BeginLogin(LoginParams loginParams)
@@ -1102,8 +1295,7 @@ namespace OpenMetaverse
         /// <param name="x">X coordinate to start at</param>
         /// <param name="y">Y coordinate to start at</param>
         /// <param name="z">Z coordinate to start at</param>
-        /// <returns>String with a URI that can be used to login to a specified
-        /// location</returns>
+        /// <returns>String with a URI that can be used to login to a specified location</returns>
         public static string StartLocation(string sim, int x, int y, int z)
         {
             return $"uri:{sim}&{x}&{y}&{z}";
@@ -1115,11 +1307,11 @@ namespace OpenMetaverse
             // FIXME: Now that we're using CAPS we could cancel the current login and start a new one
             if (loginParams == null)
             {
-                Logger.DebugLog("No Login was in progress: " + CurrentContext, Client);
+                Logger.DebugLog($"No Login was in progress: {CurrentContext}", Client);
             }
             else
             {
-                InternalStatusCode = LoginStatus.Failed;
+                LoginStatusCode = LoginStatus.Failed;
                 LoginMessage = "Aborted";
             }
             UpdateLoginStatus(LoginStatus.Failed, "Abort Requested");
@@ -1139,7 +1331,7 @@ namespace OpenMetaverse
             #region Sanity Check loginParams
 
             if (loginParams.Options == null)
-                loginParams.Options = new List<string>().ToArray();
+                loginParams.Options = new List<string>();
 
             if (loginParams.Password == null)
                 loginParams.Password = string.Empty;
@@ -1173,36 +1365,29 @@ namespace OpenMetaverse
                 loginParams.Channel = $"{Settings.USER_AGENT}";
             }
 
-            if((loginParams.Start != "home") && (loginParams.Start != "last"))
+            if (!string.IsNullOrEmpty(loginParams.LoginLocation))
             {
-                loginParams.Start = "home";
-                Logger.Log("The Start option only accepts home or last! " +
-                           "Please use LoginLocation to set a custom login location!", Helpers.LogLevel.Warning);
-            }
-
-            if (string.IsNullOrEmpty(loginParams.LoginLocation) == false)
+                var startLoc = new LocationParser(loginParams.LoginLocation.Trim());
+                loginParams.Start = startLoc.GetStartLocationUri();
+            } 
+            else
             {
-                var bits = loginParams.LoginLocation.Split('/');
-                if(bits.Count() == 4)
+                switch (loginParams.Start)
                 {
-                    if(int.TryParse(bits[1],out var X) == true)
-                    {
-                        if (int.TryParse(bits[2], out var Y) == true)
-                        {
-                            if (int.TryParse(bits[3], out var Z) == true)
-                            {
-                                Logger.Log("Setting login location to: "
-                                           + loginParams.LoginLocation, Helpers.LogLevel.Info);
-                                loginParams.Start = StartLocation(bits[0], X, Y, Z);
-                            }
-                        }
-                    }
+                    case "home":
+                    case "last":
+                        break;
+                    default:
+                        var startLoc = new LocationParser(loginParams.Start.Trim());
+                        loginParams.Start = startLoc.GetStartLocationUri();
+                        break;
                 }
             }
 
             if (loginParams.Author == null)
+            {
                 loginParams.Author = string.Empty;
-
+            }
             #endregion
 
             // TODO: Allow a user callback to be defined for handling the cert
@@ -1231,12 +1416,18 @@ namespace OpenMetaverse
                     ["id0"] = OSD.FromString(loginParams.ID0),
                     ["last_exec_event"] = OSD.FromInteger((int)loginParams.LastExecEvent)
                 };
+                if (loginParams.MfaEnabled)
+                {
+                    loginLLSD["token"] = OSD.FromString(loginParams.Token);
+                    loginLLSD["mfa_hash"] = OSD.FromString(loginParams.MfaHash);
+                }
 
                 // Create the options LLSD array
                 var optionsOSD = new OSDArray();
-                foreach (var t in loginParams.Options)
-                    optionsOSD.Add(OSD.FromString(t));
-
+                foreach (var option in loginParams.Options)
+                {
+                    optionsOSD.Add(OSD.FromString(option));
+                }
                 foreach (var t in from callbackOpts in CallbackOptions.Values where callbackOpts != null
                     from t in callbackOpts where !optionsOSD.Contains(t) select t)
                 {
@@ -1281,20 +1472,24 @@ namespace OpenMetaverse
                     ["version"] = loginParams.Version,
                     ["platform"] = loginParams.Platform,
                     ["platform_version"] = loginParams.PlatformVersion,
-                    ["mac"] = loginParams.MAC
+                    ["mac"] = loginParams.MAC,
+                    ["id0"] = loginParams.ID0,
+                    ["last_exec_event"] = (int)loginParams.LastExecEvent
                 };
-                if (loginParams.AgreeToTos)
-                    loginXmlRpc["agree_to_tos"] = "true";
-                if (loginParams.ReadCritical)
-                    loginXmlRpc["read_critical"] = "true";
-                loginXmlRpc["id0"] = loginParams.ID0;
-                loginXmlRpc["last_exec_event"] = (int)loginParams.LastExecEvent;
+                if (loginParams.AgreeToTos) { loginXmlRpc["agree_to_tos"] = "true"; }
+                if (loginParams.ReadCritical) { loginXmlRpc["read_critical"] = "true"; }
+                if (loginParams.MfaEnabled)
+                {
+                    loginXmlRpc["token"] = loginParams.Token;
+                    loginXmlRpc["mfa_hash"] = loginParams.MfaHash;
+                }
 
                 // Create the options array
                 var options = new ArrayList();
-                foreach (var t in loginParams.Options)
-                    options.Add(t);
-
+                foreach (var option in loginParams.Options)
+                {
+                    options.Add(option);
+                }
                 foreach (var callbackOpts in CallbackOptions.Values)
                 {
                     if (callbackOpts == null) continue;
@@ -1341,10 +1536,10 @@ namespace OpenMetaverse
 
         private void UpdateLoginStatus(LoginStatus status, string message)
         {
-            InternalStatusCode = status;
+            LoginStatusCode = status;
             LoginMessage = message;
 
-            Logger.DebugLog($"Login status: {status.ToString()}: {message}", Client);
+            Logger.DebugLog($"Login status: {status}: {message}", Client);
 
             // If we reached a login resolution trigger the event
             if (status == LoginStatus.Success || status == LoginStatus.Failed)
@@ -1480,7 +1675,7 @@ namespace OpenMetaverse
                 var loginParams = CurrentContext;
                 loginParams.URI = reply.NextUrl;
                 loginParams.MethodName = reply.NextMethod;
-                loginParams.Options = reply.NextOptions;
+                loginParams.Options = reply.NextOptions.ToList();
 
                 // Sleep for some amount of time while the servers work
                 var seconds = reply.NextDuration;
@@ -1713,7 +1908,7 @@ namespace OpenMetaverse
         /// <returns>Hashed string</returns>
         private static string HashString(string str)
         {
-            MD5 sec = new MD5CryptoServiceProvider();
+            MD5 sec = MD5.Create();
             var enc = new ASCIIEncoding();
             var buf = enc.GetBytes(str);
             return GetHexString(sec.ComputeHash(buf));

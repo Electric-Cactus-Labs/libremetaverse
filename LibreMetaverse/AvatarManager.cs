@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC.
+ * Copyright (c) 2021-2022, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without
@@ -1221,31 +1221,31 @@ namespace OpenMetaverse
                 switch (type)
                 {
                     case EffectType.Text:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.Icon:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.Connector:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.FlexibleObject:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.AnimalControls:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.AnimationObject:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.Cloth:
-                        Logger.Log("Received a ViewerEffect of type " + type.ToString() + ", implement me!",
+                        Logger.Log("Received a ViewerEffect of type " + type + ", implement me!",
                             Helpers.LogLevel.Warning, Client);
                         break;
                     case EffectType.Glow:
@@ -1269,7 +1269,7 @@ namespace OpenMetaverse
                             }
                             else
                             {
-                                Logger.Log("Received a " + type.ToString() +
+                                Logger.Log("Received a " + type +
                                     " ViewerEffect with an incorrect TypeData size of " +
                                     block.TypeData.Length + " bytes", Helpers.LogLevel.Warning, Client);
                             }

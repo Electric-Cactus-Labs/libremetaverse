@@ -29,15 +29,10 @@
  */
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Net;
-using System.IO;
-using System.Reflection;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
-using OpenMetaverse.StructuredData;
-using XmlRpcCore;
 using GridProxy;
 
 
@@ -286,7 +281,7 @@ public class ClientAO : ProxyPlugin
         // Start the search
         RequestFolderContents(baseFolder,
             true, 
-            (searchPath.Length == 1) ? true : false, 
+            (searchPath.Length == 1), 
             InventorySortOrder.ByName);
     }
 
@@ -551,7 +546,7 @@ public class ClientAO : ProxyPlugin
         animate.AnimationList[0].AnimID = animationuuid;
         animate.AnimationList[0].StartAnim = run;
 
-        animate.PhysicalAvatarEventList = new AgentAnimationPacket.PhysicalAvatarEventListBlock[0];
+        animate.PhysicalAvatarEventList = Array.Empty<AgentAnimationPacket.PhysicalAvatarEventListBlock>();
 
         //SayToUser("anim " + animname(animationuuid) + " " + run);
         proxy.InjectPacket(animate, Direction.Outgoing);
